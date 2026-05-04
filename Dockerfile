@@ -1,16 +1,21 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+# Imagem final enxuta
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Copiar apenas arquivos de dependências para cache
 COPY package*.json ./
 RUN npm install --production
 
-# Copiar o restante do projeto
-COPY . .
+COPY --from=builder /app/dist ./dist
 
-# Build do NestJS
-RUN npm run build
-
-# Comando de start
 CMD ["node", "dist/main.js"]
