@@ -64,10 +64,10 @@ export class WoocommerceService {
           value:
             price.qtminimaatacado > 1
               ? {
-                  [price.qtminimaatacado.toString()]: Number(
-                    price.pvendaatacado,
-                  ).toFixed(2),
-                }
+                [price.qtminimaatacado.toString()]: Number(
+                  price.pvendaatacado,
+                ).toFixed(2),
+              }
               : {},
         },
       ],
@@ -110,10 +110,10 @@ export class WoocommerceService {
           value:
             price.qtminimaatacado > 1
               ? {
-                  [price.qtminimaatacado.toString()]: Number(
-                    price.pvendaatacado,
-                  ).toFixed(2),
-                }
+                [price.qtminimaatacado.toString()]: Number(
+                  price.pvendaatacado,
+                ).toFixed(2),
+              }
               : {},
         },
       ],
@@ -347,46 +347,59 @@ export class WoocommerceService {
 
   async getAllProductsConcurrent(): Promise<any[]> {
     const perPage = 100;
+    const CONCURRENCY = 3;  // máximo de requisições simultâneas ao WooCommerce
+    const DELAY_MS = 500; // pausa entre batches para evitar rate limiting
 
-    // Primeira página
-    const firstPage = await this.api.get('products', {
-      per_page: perPage,
-      page: 1,
-      orderby: 'id',
-      order: 'asc',
-      status: 'any', // garante que pega publicados, rascunhos, privados etc.
-    });
-
-    const totalPages = parseInt(firstPage.headers['x-wp-totalpages'], 10) || 1;
-
-    // Busca páginas restantes em paralelo
-    const requests = [];
-    for (let page = 2; page <= totalPages; page++) {
-      requests.push(
-        this.api.get('products', {
+    const fetchPage = async (page: number, attempt = 1): Promise<any[]> => {
+      try {
+        const response = await this.api.get('products', {
           per_page: perPage,
           page,
           orderby: 'id',
           order: 'asc',
           status: 'any',
-        }),
-      );
+        });
+        return response.data;
+      } catch (err: any) {
+        if (attempt < 3) {
+          const delay = DELAY_MS * attempt * 2;
+          this.logger.warn(
+            `WooCommerce: página ${page} falhou (tentativa ${attempt}), retentando em ${delay}ms...`,
+          );
+          await new Promise((res) => setTimeout(res, delay));
+          return fetchPage(page, attempt + 1);
+        }
+        this.logger.error(`WooCommerce: página ${page} falhou após 3 tentativas.`);
+        return [];
+      }
+    };
+
+    // Primeira página — obtém total de páginas
+    const firstData = await fetchPage(1);
+
+    const firstResponse = await this.api.get('products', {
+      per_page: 1,
+      page: 1,
+      status: 'any',
+    });
+    const totalPages = parseInt(firstResponse.headers['x-wp-totalpages'], 10) || 1;
+
+    // Busca páginas restantes em batches controlados
+    const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+    const extraData: any[] = [];
+
+    for (let i = 0; i < remainingPages.length; i += CONCURRENCY) {
+      const batch = remainingPages.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.all(batch.map((page) => fetchPage(page)));
+      batchResults.forEach((pageData) => extraData.push(...pageData));
+
+      if (i + CONCURRENCY < remainingPages.length) {
+        await new Promise((res) => setTimeout(res, DELAY_MS));
+      }
     }
 
-    const results = await Promise.allSettled(requests);
-
-    // Junta tudo
-    const allProducts = [
-      ...firstPage.data,
-      ...results
-        .filter(
-          (r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled',
-        )
-        .flatMap((r) => r.value.data),
-    ];
-
     const unique = new Map<number, any>();
-    for (const product of allProducts) {
+    for (const product of [...firstData, ...extraData]) {
       unique.set(product.id, product);
     }
 

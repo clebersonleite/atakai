@@ -1,12 +1,30 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import {
   BadRequestException,
   Injectable,
   Logger,
+  OnModuleInit,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+
+interface ProductSnapshot {
+  pvenda: number;
+  pvendaatacado: number;
+  qtminimaatacado: number;
+  estoque: number;
+}
+
+interface SyncStats {
+  lastSync: string | null;
+  lastSyncDurationSeconds: number | null;
+  productsCreated: number;
+  productsUpdated: number;
+  productsDeleted: number;
+}
 
 import { CreateOmniClientDto } from '../omnia/interfaces/omnia-create-client.interface';
 import { OmniaPriceInterface } from '../omnia/interfaces/omnia-price.interface';
@@ -21,15 +39,76 @@ import { processBatch } from 'src/shared/utils/proccessBatch.utils';
 import { retry } from 'src/shared/utils/retry.utils';
 
 @Injectable()
-export class SyncService {
-  private wooProductsMap: Map<string, any> = new Map();
-  private omniaProductsMap: Map<string, any> = new Map();
+export class SyncService implements OnModuleInit {
+  private readonly SNAPSHOT_PATH = path.join(process.cwd(), '.sync-snapshot.json');
+  private readonly STATS_PATH = path.join(process.cwd(), '.sync-stats.json');
+  private snapshot: Map<string, string> = new Map();
 
   constructor(
     private readonly omniaService: OmniaService,
     private readonly woocommerceService: WoocommerceService,
     private readonly logger: Logger,
-  ) {}
+  ) { }
+
+  async onModuleInit() {
+    await this.loadSnapshot();
+  }
+
+  private async loadSnapshot(): Promise<void> {
+    try {
+      if (fs.existsSync(this.SNAPSHOT_PATH)) {
+        const raw = fs.readFileSync(this.SNAPSHOT_PATH, 'utf8');
+        const data: Record<string, string> = JSON.parse(raw);
+        this.snapshot = new Map(Object.entries(data));
+        this.logger.log(`Snapshot carregado: ${this.snapshot.size} produtos`);
+      } else {
+        this.logger.log('Nenhum snapshot encontrado, será criado na próxima sincronização');
+      }
+    } catch {
+      this.logger.warn('Falha ao carregar snapshot, iniciando vazio');
+      this.snapshot = new Map();
+    }
+  }
+
+  private saveSnapshot(newSnapshot: Map<string, string>): void {
+    try {
+      const data = Object.fromEntries(newSnapshot);
+      fs.writeFileSync(this.SNAPSHOT_PATH, JSON.stringify(data), 'utf8');
+      this.snapshot = newSnapshot;
+    } catch {
+      this.logger.warn('Falha ao salvar snapshot');
+    }
+  }
+
+  private buildSnapshotKey(price: OmniaPriceInterface, estoque: number): string {
+    return `${price.pvenda}|${price.pvendaatacado}|${price.qtminimaatacado}|${estoque}`;
+  }
+
+  private saveStats(stats: SyncStats): void {
+    try {
+      fs.writeFileSync(this.STATS_PATH, JSON.stringify(stats, null, 2), 'utf8');
+    } catch {
+      this.logger.warn('Falha ao salvar estatísticas de sincronização');
+    }
+  }
+
+  getSyncStats(): SyncStats {
+    try {
+      if (fs.existsSync(this.STATS_PATH)) {
+        const raw = fs.readFileSync(this.STATS_PATH, 'utf8');
+        return JSON.parse(raw) as SyncStats;
+      }
+    } catch {
+      this.logger.warn('Falha ao ler estatísticas de sincronização');
+    }
+    return {
+      lastSync: null,
+      lastSyncDurationSeconds: null,
+      productsCreated: 0,
+      productsUpdated: 0,
+      productsDeleted: 0,
+    };
+  }
 
   async processNewOrder(rawBody: Buffer, signature: string) {
     if (!rawBody) {
@@ -59,6 +138,11 @@ export class SyncService {
     const ibgeCode = await getIbgeCodeByCep(
       order.billing.postcode.replace('-', ''),
     );
+
+    if (!ibgeCode) {
+      this.logger.error('Código IBGE não encontrado para o CEP informado');
+      throw new BadRequestException('CEP inválido ou não encontrado');
+    }
 
     const clientFromNewOrder = this.formatClient(order, ibgeCode);
 
@@ -101,13 +185,13 @@ export class SyncService {
       ]);
 
       // Mapa de produtos WooCommerce (usando SKU único)
-      this.wooProductsMap = new Map();
+      const wooProductsMap: Map<string, any> = new Map();
       woocommerceProducts.forEach((p) => {
         if (p.sku) {
           const normalizedSku = String(p.sku);
           // Se já existe, mantém o primeiro
-          if (!this.wooProductsMap.has(normalizedSku)) {
-            this.wooProductsMap.set(normalizedSku, p);
+          if (!wooProductsMap.has(normalizedSku)) {
+            wooProductsMap.set(normalizedSku, p);
           }
         } else {
           this.logger.error(`Produto ${p.name} sem SKU, pulando...`);
@@ -115,7 +199,7 @@ export class SyncService {
       });
 
       // Mapa de produtos Omnia (usando preços, considerando apenas valores únicos)
-      this.omniaProductsMap = new Map();
+      const omniaProductsMap: Map<string, any> = new Map();
 
       // Primeiro, criar um mapa para agrupar por codprod (último preço vence)
       const omniaPricesByCodprod = new Map();
@@ -127,19 +211,33 @@ export class SyncService {
 
       // Agora popular o mapa principal
       omniaPricesByCodprod.forEach((price, sku) => {
-        this.omniaProductsMap.set(sku, price);
+        omniaProductsMap.set(sku, price);
+      });
+
+      // Mapa de estoque por codprod para lookup O(1)
+      const omniaStockMap = new Map<string, number>();
+      omniaStock.forEach((s) => {
+        if (s.codprod) omniaStockMap.set(String(s.codprod), s.estoque ?? 0);
       });
 
       const newProducts: OmniaPriceInterface[] = [];
       const updateProducts: OmniaPriceInterface[] = [];
+      const newSnapshot = new Map<string, string>();
 
       // Verificar produtos do Omnia que não existem no WooCommerce
-      for (const [sku, product] of this.omniaProductsMap) {
-        if (!this.wooProductsMap.has(sku)) {
+      for (const [sku, product] of omniaProductsMap) {
+        const estoque = omniaStockMap.get(sku) ?? 0;
+        const snapshotKey = this.buildSnapshotKey(product, estoque);
+        newSnapshot.set(sku, snapshotKey);
+
+        if (!wooProductsMap.has(sku)) {
           newProducts.push(product);
           this.logger.debug(`SKU novo, será criado: ${sku}`);
         } else {
-          updateProducts.push(product);
+          // Só adiciona à fila se houve mudança desde o último sync
+          if (this.snapshot.get(sku) !== snapshotKey) {
+            updateProducts.push(product);
+          }
         }
       }
 
@@ -158,19 +256,19 @@ export class SyncService {
       }
 
       this.logger.log(
-        `Produtos únicos WooCommerce: ${this.wooProductsMap.size} | Produtos únicos Omnia: ${this.omniaProductsMap.size}`,
+        `Produtos únicos WooCommerce: ${wooProductsMap.size} | Produtos únicos Omnia: ${omniaProductsMap.size}`,
       );
 
       this.logger.log(
-        `Produtos novos: ${newProducts.length} | Produtos para atualizar: ${updateProducts.length}`,
+        `Produtos novos: ${newProducts.length} | Produtos com alteração: ${updateProducts.length} (${omniaProductsMap.size - newProducts.length - updateProducts.length} sem mudança, ignorados)`,
       );
 
       // Produtos para remover (existem no Woo mas não no Omnia)
-      const deleteProducts = Array.from(this.wooProductsMap.values()).filter(
+      const deleteProducts = Array.from(wooProductsMap.values()).filter(
         (p) => {
           if (!p.sku) return false;
           const normalizedSku = String(p.sku);
-          return !this.omniaProductsMap.has(normalizedSku);
+          return !omniaProductsMap.has(normalizedSku);
         },
       );
 
@@ -179,17 +277,28 @@ export class SyncService {
       );
 
       // Executar em paralelo para melhor performance
-      await Promise.all([
-        this.createProductsBatch(newProducts, omniaStock, omniaPrices),
-        this.updateProductsBatch(updateProducts, omniaStock, omniaPrices),
+      const [createResult, updateResult, deleteResult] = await Promise.all([
+        this.createProductsBatch(newProducts, omniaStock, omniaPrices, wooProductsMap),
+        this.updateProductsBatch(updateProducts, omniaStock, omniaPrices, wooProductsMap),
         this.deleteProductsBatch(deleteProducts),
       ]);
+
+      // Persistir snapshot atualizado
+      this.saveSnapshot(newSnapshot);
 
       // Verificar consistência após sincronização
       await this.verifySyncConsistency();
 
       const duration = Date.now() - startTime;
       const durationInSeconds = (duration / 1000).toFixed(2);
+
+      this.saveStats({
+        lastSync: new Date().toISOString(),
+        lastSyncDurationSeconds: parseFloat(durationInSeconds),
+        productsCreated: createResult.created,
+        productsUpdated: updateResult.updated,
+        productsDeleted: deleteResult.deleted,
+      });
 
       this.logger.log(`Sincronização concluída em ${durationInSeconds}s`);
     } catch (error) {
@@ -208,22 +317,14 @@ export class SyncService {
     newProducts: OmniaPriceInterface[],
     omniaStock: OmniaStockInterface[],
     omniaPrices: OmniaPriceInterface[],
-  ) {
+    wooProductsMap: Map<string, any>,
+  ): Promise<{ created: number }> {
     const failedList: string[] = [];
-
-    // Garantir que o mapa tenha todos os produtos existentes do WooCommerce
-    if (!this.wooProductsMap || this.wooProductsMap.size === 0) {
-      const allWooProducts =
-        await this.woocommerceService.getAllProductsConcurrent();
-      this.wooProductsMap = new Map();
-      allWooProducts.forEach((p) => {
-        if (p.sku) this.wooProductsMap.set(p.sku, p);
-      });
-    }
+    let createdCount = 0;
 
     await processBatch(newProducts, async (product) => {
       const sku = String(product.codprod);
-      const existingProduct = this.wooProductsMap.get(sku);
+      const existingProduct = wooProductsMap.get(sku);
 
       const stockQty =
         omniaStock.find((s) => String(s.codprod) === sku)?.estoque ?? 0;
@@ -252,9 +353,10 @@ export class SyncService {
             price,
           );
           this.logger.log(`✅ Criado SKU ${sku}`);
+          createdCount++;
 
           // Adicionar ao mapa local
-          this.wooProductsMap.set(sku, createdProduct);
+          wooProductsMap.set(sku, createdProduct);
         }
       } catch (err: any) {
         // Tratar erro de SKU duplicado
@@ -264,6 +366,7 @@ export class SyncService {
           product,
           stockQty,
           price,
+          wooProductsMap,
         );
         if (!handled) {
           failedList.push(sku);
@@ -280,18 +383,22 @@ export class SyncService {
         `${failedList.length} produtos não foram criados. SKUs: ${failedList.join(', ')}`,
       );
     }
+
+    return { created: createdCount };
   }
 
   private async updateProductsBatch(
     updateProducts: OmniaPriceInterface[],
     omniaStock: OmniaStockInterface[],
     omniaPrices: OmniaPriceInterface[],
-  ) {
+    wooProductsMap: Map<string, any>,
+  ): Promise<{ updated: number }> {
     const failedUpdates: string[] = [];
+    let updatedCount = 0;
 
     await processBatch(updateProducts, async (product) => {
       const sku = String(product.codprod);
-      const wcProduct = this.wooProductsMap.get(sku);
+      const wcProduct = wooProductsMap.get(sku);
 
       if (!wcProduct) {
         this.logger.warn(
@@ -325,7 +432,7 @@ export class SyncService {
       if (
         wcProduct.regular_price &&
         parseFloat(Number(wcProduct.regular_price).toFixed(2)) !==
-          parseFloat(Number(price.pvenda).toFixed(2))
+        parseFloat(Number(price.pvenda).toFixed(2))
       ) {
         changes.push(`preço: ${wcProduct.regular_price} → ${price.pvenda}`);
       }
@@ -337,10 +444,10 @@ export class SyncService {
       const omniaTieredRules =
         price.qtminimaatacado > 1
           ? {
-              [price.qtminimaatacado.toString()]: Number(
-                price.pvendaatacado,
-              ).toFixed(2),
-            }
+            [price.qtminimaatacado.toString()]: Number(
+              price.pvendaatacado,
+            ).toFixed(2),
+          }
           : {};
 
       if (JSON.stringify(wcTieredRules) !== JSON.stringify(omniaTieredRules)) {
@@ -362,6 +469,7 @@ export class SyncService {
               `Atualizado SKU ${sku} | Campos alterados: ${changes.join(', ')}`,
             );
           });
+          updatedCount++;
         } catch (err) {
           failedUpdates.push(sku);
           this.logger.error(err, `❌ Erro atualizar SKU ${sku}`);
@@ -374,10 +482,13 @@ export class SyncService {
         `${failedUpdates.length} produtos não foram atualizados. SKUs: ${failedUpdates.join(', ')}`,
       );
     }
+
+    return { updated: updatedCount };
   }
 
-  private async deleteProductsBatch(deleteProducts: any[]) {
+  private async deleteProductsBatch(deleteProducts: any[]): Promise<{ deleted: number }> {
     const failedDeletes: string[] = [];
+    let deletedCount = 0;
 
     await processBatch(deleteProducts, async (product) => {
       const sku = String(product.sku).trim();
@@ -387,6 +498,7 @@ export class SyncService {
           await this.woocommerceService.deleteProduct(product.id);
           this.logger.log(`Produto movido para lixeira ${sku}`);
         });
+        deletedCount++;
       } catch (err) {
         failedDeletes.push(sku);
         this.logger.error(err, `Erro ao deletar SKU ${sku}`);
@@ -398,6 +510,8 @@ export class SyncService {
         `${failedDeletes.length} produtos não foram removidos. SKUs: ${failedDeletes.join(', ')}`,
       );
     }
+
+    return { deleted: deletedCount };
   }
 
   private async handleProductError(
@@ -406,12 +520,13 @@ export class SyncService {
     product: OmniaProduct,
     stockQty: number,
     price: OmniaPriceInterface,
+    wooProductsMap: Map<string, any>,
   ): Promise<boolean> {
     const uniqueSku = error?.response?.data?.data?.unique_sku;
 
     if (uniqueSku) {
       const normalizedSku = uniqueSku;
-      const existingProduct = this.wooProductsMap.get(normalizedSku);
+      const existingProduct = wooProductsMap.get(normalizedSku);
 
       if (existingProduct) {
         try {
@@ -422,8 +537,6 @@ export class SyncService {
             price,
           );
 
-          // Atualiza o mapa com os dados atualizados
-          this.wooProductsMap.set(normalizedSku, existingProduct);
           this.logger.warn(
             `SKU ${sku} já existe como ${uniqueSku}, atualizado com sucesso`,
           );
@@ -455,8 +568,10 @@ export class SyncService {
         .map((p) => String(p.codprod))
         .filter((sku) => sku !== '');
 
-      const missingInWoo = omniaSkus.filter((sku) => !wooSkus.includes(sku));
-      const extraInWoo = wooSkus.filter((sku) => !omniaSkus.includes(sku));
+      const wooSkusSet = new Set(wooSkus);
+      const omniaSkusSet = new Set(omniaSkus);
+      const missingInWoo = omniaSkus.filter((sku) => !wooSkusSet.has(sku));
+      const extraInWoo = wooSkus.filter((sku) => !omniaSkusSet.has(sku));
 
       this.logger.log(`Verificação de consistência:`);
       this.logger.log(
@@ -505,7 +620,7 @@ export class SyncService {
       estent: order.billing.state,
       cepent: order.billing.postcode.replace('-', ''),
       telent: order.billing.phone.replace(/\D/g, ''),
-      telcelent: order.billing.phone.replace(/\D/g, ''),
+      telcelent: (order.billing.cellphone || order.billing.phone).replace(/\D/g, ''),
     };
 
     return clientFromNewOrder;
@@ -528,7 +643,7 @@ export class SyncService {
       codfilial: '3',
       cliente: `${order.billing.first_name} ${order.billing.last_name}`,
       fantasia: order.billing.company ?? '',
-      cnpj: order.billing.cnpj,
+      cnpj: order.billing.persontype === 'F' ? order.billing.cpf : order.billing.cnpj,
       ieent: 'ISENTO',
       rg: '',
       emailnfe: order.billing.email,
@@ -543,7 +658,7 @@ export class SyncService {
       telent: order.billing.phone.replace(/\D/g, ''),
       telcelent: order.billing.phone.replace(/\D/g, ''),
       fretedespacho: 'C',
-      idtransportadora: order.shipping_lines[0].method_title,
+      idtransportadora: order.shipping_lines[0]?.method_title ?? '',
       vlprodutos: allProductsValue,
       vlfrete: order.shipping_total,
       vltotal: order.total,

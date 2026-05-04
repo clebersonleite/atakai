@@ -1,5 +1,6 @@
 import {
   Controller,
+  HttpException,
   Post,
   Headers,
   Req,
@@ -15,7 +16,7 @@ export class SyncController {
   constructor(
     private readonly syncService: SyncService,
     private readonly logger: Logger,
-  ) {}
+  ) { }
 
   @Post('woocommerce/webhook/created-order')
   async handleOrderCreated(
@@ -29,8 +30,12 @@ export class SyncController {
 
       res.status(200).send({ received: true });
     } catch (error) {
-      console.error('Erro ao processar webhook', error);
-      res.status(500).send({ error: 'Erro interno' });
+      if (error instanceof HttpException) {
+        res.status(error.getStatus()).send({ error: error.message });
+      } else {
+        console.error('Erro ao processar webhook', error);
+        res.status(500).send({ error: 'Erro interno' });
+      }
     }
   }
 
@@ -38,5 +43,17 @@ export class SyncController {
   async getAllProductsFromApis() {
     this.logger.log('Iniciando busca de produtos, estoque e preços...');
     return await this.syncService.syncProducts();
+  }
+
+  @Get('stats')
+  async getSyncStats(
+    @Headers('x-api-key') apiKey: string,
+    @Res() res: Response,
+  ) {
+    const expectedKey = process.env.SYNC_STATS_API_KEY;
+    if (!expectedKey || apiKey !== expectedKey) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+    return res.status(200).json(this.syncService.getSyncStats());
   }
 }
