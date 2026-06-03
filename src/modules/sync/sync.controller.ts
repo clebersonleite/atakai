@@ -6,6 +6,7 @@ import {
   Req,
   Res,
   Get,
+  Param,
   Logger,
 } from '@nestjs/common';
 import { SyncService } from './sync.service';
@@ -37,6 +38,11 @@ export class SyncController {
         res.status(500).send({ error: 'Erro interno' });
       }
     }
+  }
+
+  @Get('compare/:sku')
+  async compareProduct(@Param('sku') sku: string) {
+    return await this.syncService.compareProduct(sku);
   }
 
   @Get('all-products-from-apis')

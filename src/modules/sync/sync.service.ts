@@ -148,6 +148,63 @@ export class SyncService implements OnModuleInit {
     return [];
   }
 
+  async compareProduct(sku: string) {
+    const [wcProduct, omniaData] = await Promise.all([
+      this.woocommerceService.getProductBySku(sku),
+      this.omniaService.getProductBySku(sku),
+    ]);
+
+    const omniaPrice = omniaData.prices[0] ?? null;
+    const omniaStock = omniaData.stock[0] ?? null;
+
+    const wcWholesaleRules =
+      wcProduct?.meta_data?.find((m: any) => m.key === '_fixed_price_rules')?.value ?? {};
+
+    const omniaWholesaleRules =
+      omniaPrice && omniaPrice.qtminimaatacado > 1
+        ? { [omniaPrice.qtminimaatacado.toString()]: Number(omniaPrice.pvendaatacado).toFixed(2) }
+        : {};
+
+    const wcPriceNum = wcProduct ? parseFloat(Number(wcProduct.regular_price).toFixed(2)) : null;
+    const omniaPriceNum = omniaPrice ? parseFloat(Number(omniaPrice.pvenda).toFixed(2)) : null;
+    const wcStockNum = wcProduct?.stock_quantity ?? null;
+    const omniaStockNum = omniaStock?.estoque ?? null;
+
+    const priceMatch = wcPriceNum !== null && omniaPriceNum !== null && wcPriceNum === omniaPriceNum;
+    const stockMatch = wcStockNum !== null && omniaStockNum !== null && wcStockNum === omniaStockNum;
+    const wholesaleMatch = JSON.stringify(wcWholesaleRules) === JSON.stringify(omniaWholesaleRules);
+
+    return {
+      sku,
+      foundInWooCommerce: !!wcProduct,
+      foundInOmnia: !!omniaPrice,
+      woocommerce: wcProduct
+        ? {
+            id: wcProduct.id,
+            name: wcProduct.name,
+            status: wcProduct.status,
+            regular_price: wcProduct.regular_price,
+            stock_quantity: wcProduct.stock_quantity,
+            stock_status: wcProduct.stock_status,
+            manage_stock: wcProduct.manage_stock,
+            weight: wcProduct.weight,
+            dimensions: wcProduct.dimensions,
+            wholesale_rules: wcWholesaleRules,
+          }
+        : null,
+      omnia: {
+        price: omniaPrice,
+        stock: omniaStock,
+      },
+      diff: {
+        price: { match: priceMatch, woo: wcPriceNum, omnia: omniaPriceNum },
+        stock: { match: stockMatch, woo: wcStockNum, omnia: omniaStockNum },
+        wholesaleRules: { match: wholesaleMatch, woo: wcWholesaleRules, omnia: omniaWholesaleRules },
+      },
+      inSync: priceMatch && stockMatch && wholesaleMatch,
+    };
+  }
+
   async processNewOrder(rawBody: Buffer, signature: string) {
     if (!rawBody) {
       this.logger.error('Body não encontrado na requisição');
