@@ -200,17 +200,20 @@ export class OmniaService {
   async getProductBySku(sku: string): Promise<{
     prices: OmniaPriceInterface[];
     stock: OmniaStockInterface[];
+    products: OmniaProduct[];
   }> {
     const token = await this.getToken();
 
-    const [prices, stock] = await Promise.all([
+    const [prices, stock, products] = await Promise.all([
       this.fetchAllPagesConcurrent<OmniaPriceInterface>('/api/v1/precos', token),
       this.fetchAllPagesConcurrent<OmniaStockInterface>('/api/v1/estoques', token),
+      this.fetchAllPagesConcurrent<OmniaProduct>('/api/v1/produtos', token),
     ]);
 
     return {
       prices: prices.filter((p) => String(p.codprod) === String(sku)),
       stock: stock.filter((s) => String(s.codprod) === String(sku)),
+      products: products.filter((p) => String(p.codprod) === String(sku)),
     };
   }
 

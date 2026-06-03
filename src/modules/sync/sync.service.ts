@@ -156,6 +156,7 @@ export class SyncService implements OnModuleInit {
 
     const omniaPrice = omniaData.prices[0] ?? null;
     const omniaStock = omniaData.stock[0] ?? null;
+    const omniaProduct = omniaData.products[0] ?? null;
 
     const wcWholesaleRules =
       wcProduct?.meta_data?.find((m: any) => m.key === '_fixed_price_rules')?.value ?? {};
@@ -195,6 +196,8 @@ export class SyncService implements OnModuleInit {
       omnia: {
         price: omniaPrice,
         stock: omniaStock,
+        descricao: omniaProduct?.descricao ?? null,
+        nomeecommerce: omniaProduct?.nomeecommerce ?? null,
       },
       diff: {
         price: { match: priceMatch, woo: wcPriceNum, omnia: omniaPriceNum },
