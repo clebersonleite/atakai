@@ -197,6 +197,23 @@ export class OmniaService {
     }
   }
 
+  async getProductBySku(sku: string): Promise<{
+    prices: OmniaPriceInterface[];
+    stock: OmniaStockInterface[];
+  }> {
+    const token = await this.getToken();
+
+    const [prices, stock] = await Promise.all([
+      this.fetchAllPagesConcurrent<OmniaPriceInterface>('/api/v1/precos', token),
+      this.fetchAllPagesConcurrent<OmniaStockInterface>('/api/v1/estoques', token),
+    ]);
+
+    return {
+      prices: prices.filter((p) => String(p.codprod) === String(sku)),
+      stock: stock.filter((s) => String(s.codprod) === String(sku)),
+    };
+  }
+
   async createClient(client: CreateOmniClientDto): Promise<any> {
     const token = await this.getToken();
     this.logger.log('Criando cliente...');

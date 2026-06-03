@@ -56,4 +56,16 @@ export class SyncController {
     }
     return res.status(200).json(this.syncService.getSyncStats());
   }
+
+  @Get('logs')
+  async getSyncLogs(
+    @Headers('x-api-key') apiKey: string,
+    @Res() res: Response,
+  ) {
+    const expectedKey = process.env.SYNC_STATS_API_KEY;
+    if (!expectedKey || apiKey !== expectedKey) {
+      return res.status(401).json({ error: 'Não autorizado' });
+    }
+    return res.status(200).json(this.syncService.getSyncLogs());
+  }
 }

@@ -1,10 +1,15 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 
 import { OmniaService } from './omnia.service';
 
 @Controller('omnia')
 export class OmniaController {
   constructor(private readonly omniaService: OmniaService) {}
+
+  @Get('produto/:sku')
+  async getProductBySku(@Param('sku') sku: string) {
+    return await this.omniaService.getProductBySku(sku);
+  }
 
   @Get('all')
   async getAllData(): Promise<{

@@ -42,7 +42,10 @@ import { retry } from 'src/shared/utils/retry.utils';
 export class SyncService implements OnModuleInit {
   private readonly SNAPSHOT_PATH = path.join(process.cwd(), '.sync-snapshot.json');
   private readonly STATS_PATH = path.join(process.cwd(), '.sync-stats.json');
+  private readonly LOGS_PATH = path.join(process.cwd(), '.sync-logs.json');
+  private readonly MAX_LOGS = 500;
   private snapshot: Map<string, string> = new Map();
+  private sessionLogs: Array<{ ts: string; level: string; msg: string }> = [];
 
   constructor(
     private readonly omniaService: OmniaService,
@@ -110,6 +113,41 @@ export class SyncService implements OnModuleInit {
     };
   }
 
+  private appendSyncLog(level: 'log' | 'warn' | 'error', message: string): void {
+    if (level === 'log') this.logger.log(message);
+    else if (level === 'warn') this.logger.warn(message);
+    else this.logger.error(message);
+    this.sessionLogs.push({ ts: new Date().toISOString(), level, msg: message });
+  }
+
+  private flushSyncLogs(): void {
+    try {
+      let existing: Array<{ ts: string; level: string; msg: string }> = [];
+      if (fs.existsSync(this.LOGS_PATH)) {
+        existing = JSON.parse(fs.readFileSync(this.LOGS_PATH, 'utf8'));
+      }
+      const combined = [...existing, ...this.sessionLogs].slice(-this.MAX_LOGS);
+      fs.writeFileSync(this.LOGS_PATH, JSON.stringify(combined), 'utf8');
+    } catch {
+      // ignore
+    } finally {
+      this.sessionLogs = [];
+    }
+  }
+
+  getSyncLogs(limit = 200): Array<{ ts: string; level: string; msg: string }> {
+    try {
+      if (fs.existsSync(this.LOGS_PATH)) {
+        const raw = fs.readFileSync(this.LOGS_PATH, 'utf8');
+        const logs = JSON.parse(raw) as Array<{ ts: string; level: string; msg: string }>;
+        return logs.slice(-limit);
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  }
+
   async processNewOrder(rawBody: Buffer, signature: string) {
     if (!rawBody) {
       this.logger.error('Body não encontrado na requisição');
@@ -175,7 +213,8 @@ export class SyncService implements OnModuleInit {
 
   async syncProducts() {
     const startTime = Date.now();
-    this.logger.log('Iniciando sincronização de produtos');
+    this.sessionLogs = [];
+    this.appendSyncLog('log', 'Iniciando sincronização de produtos');
 
     try {
       const [woocommerceProducts, omniaStock, omniaPrices] = await Promise.all([
@@ -194,7 +233,7 @@ export class SyncService implements OnModuleInit {
             wooProductsMap.set(normalizedSku, p);
           }
         } else {
-          this.logger.error(`Produto ${p.name} sem SKU, pulando...`);
+          this.appendSyncLog('error', `Produto ${p.name} sem SKU, pulando...`);
         }
       });
 
@@ -243,25 +282,16 @@ export class SyncService implements OnModuleInit {
 
       // Mostra os produtos que estão faltando criar no WooCommerce
       if (newProducts.length > 0) {
-        this.logger.warn(
-          `Faltam ${newProducts.length} produtos para criar no WooCommerce.`,
-        );
+        this.appendSyncLog('warn', `Faltam ${newProducts.length} produtos para criar no WooCommerce.`);
         newProducts.forEach((p) => {
           this.logger.debug(`Faltando criar: SKU=${p.codprod}`);
         });
       } else {
-        this.logger.log(
-          'Todos os produtos estão sincronizados no WooCommerce.',
-        );
+        this.appendSyncLog('log', 'Todos os produtos estão sincronizados no WooCommerce.');
       }
 
-      this.logger.log(
-        `Produtos únicos WooCommerce: ${wooProductsMap.size} | Produtos únicos Omnia: ${omniaProductsMap.size}`,
-      );
-
-      this.logger.log(
-        `Produtos novos: ${newProducts.length} | Produtos com alteração: ${updateProducts.length} (${omniaProductsMap.size - newProducts.length - updateProducts.length} sem mudança, ignorados)`,
-      );
+      this.appendSyncLog('log', `Produtos únicos WooCommerce: ${wooProductsMap.size} | Produtos únicos Omnia: ${omniaProductsMap.size}`);
+      this.appendSyncLog('log', `Produtos novos: ${newProducts.length} | Produtos com alteração: ${updateProducts.length} (${omniaProductsMap.size - newProducts.length - updateProducts.length} sem mudança, ignorados)`);
 
       // Produtos para remover (existem no Woo mas não no Omnia)
       const deleteProducts = Array.from(wooProductsMap.values()).filter(
@@ -272,9 +302,7 @@ export class SyncService implements OnModuleInit {
         },
       );
 
-      this.logger.log(
-        `Total SKUs a remover/rascunho: ${deleteProducts.length}`,
-      );
+      this.appendSyncLog('log', `Total SKUs a remover/rascunho: ${deleteProducts.length}`);
 
       // Executar em paralelo para melhor performance
       const [createResult, updateResult, deleteResult] = await Promise.all([
@@ -300,9 +328,11 @@ export class SyncService implements OnModuleInit {
         productsDeleted: deleteResult.deleted,
       });
 
-      this.logger.log(`Sincronização concluída em ${durationInSeconds}s`);
+      this.appendSyncLog('log', `Sincronização concluída em ${durationInSeconds}s`);
+      this.flushSyncLogs();
     } catch (error) {
-      this.logger.error('Erro durante a sincronização:', error);
+      this.appendSyncLog('error', `Erro durante a sincronização: ${String(error)}`);
+      this.flushSyncLogs();
       throw error;
     }
   }
@@ -331,7 +361,7 @@ export class SyncService implements OnModuleInit {
       const price = omniaPrices.find((pr) => String(pr.codprod) === sku);
 
       if (!price) {
-        this.logger.warn(`Produto ${sku} sem preço no Omnia, pulando`);
+        this.appendSyncLog('warn', `Produto ${sku} sem preço no Omnia, pulando`);
         return;
       }
 
@@ -344,7 +374,7 @@ export class SyncService implements OnModuleInit {
             { estoque: stockQty },
             price,
           );
-          this.logger.log(`🔄 SKU ${sku} já existia, atualizado com sucesso`);
+          this.appendSyncLog('log', `🔄 SKU ${sku} já existia, atualizado com sucesso`);
         } else {
           // Cria produto novo
           const createdProduct = await this.woocommerceService.createProducts(
@@ -352,7 +382,7 @@ export class SyncService implements OnModuleInit {
             { estoque: stockQty },
             price,
           );
-          this.logger.log(`✅ Criado SKU ${sku}`);
+          this.appendSyncLog('log', `✅ Criado SKU ${sku}`);
           createdCount++;
 
           // Adicionar ao mapa local
@@ -370,18 +400,13 @@ export class SyncService implements OnModuleInit {
         );
         if (!handled) {
           failedList.push(sku);
-          this.logger.error(
-            err.response?.data || err.message,
-            `❌ Erro criar SKU ${sku}`,
-          );
+          this.appendSyncLog('error', `❌ Erro criar SKU ${sku}: ${err?.response?.data?.message || err?.message || String(err)}`);
         }
       }
     });
 
     if (failedList.length > 0) {
-      this.logger.warn(
-        `${failedList.length} produtos não foram criados. SKUs: ${failedList.join(', ')}`,
-      );
+      this.appendSyncLog('warn', `${failedList.length} produtos não foram criados. SKUs: ${failedList.join(', ')}`);
     }
 
     return { created: createdCount };
@@ -401,9 +426,7 @@ export class SyncService implements OnModuleInit {
       const wcProduct = wooProductsMap.get(sku);
 
       if (!wcProduct) {
-        this.logger.warn(
-          `Produto ${sku} não encontrado no WooCommerce para atualização`,
-        );
+        this.appendSyncLog('warn', `Produto ${sku} não encontrado no WooCommerce para atualização`);
         return;
       }
 
@@ -412,9 +435,7 @@ export class SyncService implements OnModuleInit {
       const price = omniaPrices.find((pr) => String(pr.codprod) === sku);
 
       if (!price) {
-        this.logger.warn(
-          `Produto ${sku} sem preço no Omnia, pulando atualização`,
-        );
+        this.appendSyncLog('warn', `Produto ${sku} sem preço no Omnia, pulando atualização`);
         return;
       }
 
@@ -465,22 +486,18 @@ export class SyncService implements OnModuleInit {
               { estoque: stockQty },
               price,
             );
-            this.logger.log(
-              `Atualizado SKU ${sku} | Campos alterados: ${changes.join(', ')}`,
-            );
+            this.appendSyncLog('log', `Atualizado SKU ${sku} | Campos alterados: ${changes.join(', ')}`);
           });
           updatedCount++;
         } catch (err) {
           failedUpdates.push(sku);
-          this.logger.error(err, `❌ Erro atualizar SKU ${sku}`);
+          this.appendSyncLog('error', `❌ Erro atualizar SKU ${sku}: ${err?.message || String(err)}`);
         }
       }
     });
 
     if (failedUpdates.length > 0) {
-      this.logger.warn(
-        `${failedUpdates.length} produtos não foram atualizados. SKUs: ${failedUpdates.join(', ')}`,
-      );
+      this.appendSyncLog('warn', `${failedUpdates.length} produtos não foram atualizados. SKUs: ${failedUpdates.join(', ')}`);
     }
 
     return { updated: updatedCount };
@@ -496,19 +513,17 @@ export class SyncService implements OnModuleInit {
       try {
         await retry(async () => {
           await this.woocommerceService.deleteProduct(product.id);
-          this.logger.log(`Produto movido para lixeira ${sku}`);
+          this.appendSyncLog('log', `🗑️ Produto removido SKU ${sku}`);
         });
         deletedCount++;
       } catch (err) {
         failedDeletes.push(sku);
-        this.logger.error(err, `Erro ao deletar SKU ${sku}`);
+        this.appendSyncLog('error', `Erro ao deletar SKU ${sku}: ${err?.message || String(err)}`);
       }
     });
 
     if (failedDeletes.length > 0) {
-      this.logger.warn(
-        `${failedDeletes.length} produtos não foram removidos. SKUs: ${failedDeletes.join(', ')}`,
-      );
+      this.appendSyncLog('warn', `${failedDeletes.length} produtos não foram removidos. SKUs: ${failedDeletes.join(', ')}`);
     }
 
     return { deleted: deletedCount };
@@ -573,29 +588,19 @@ export class SyncService implements OnModuleInit {
       const missingInWoo = omniaSkus.filter((sku) => !wooSkusSet.has(sku));
       const extraInWoo = wooSkus.filter((sku) => !omniaSkusSet.has(sku));
 
-      this.logger.log(`Verificação de consistência:`);
-      this.logger.log(
-        `   - Produtos faltando no WooCommerce: ${missingInWoo.length}`,
-      );
-      this.logger.log(
-        `   - Produtos extras no WooCommerce: ${extraInWoo.length}`,
-      );
+      this.appendSyncLog('log', `Verificação de consistência: faltando no Woo: ${missingInWoo.length} | extras no Woo: ${extraInWoo.length}`);
 
       if (missingInWoo.length > 0) {
-        this.logger.warn(
-          `   - SKUs faltantes: ${missingInWoo.slice(0, 10).join(', ')}${missingInWoo.length > 10 ? '...' : ''}`,
-        );
+        this.appendSyncLog('warn', `SKUs faltantes: ${missingInWoo.slice(0, 10).join(', ')}${missingInWoo.length > 10 ? '...' : ''}`);
       }
 
       if (extraInWoo.length > 0) {
-        this.logger.warn(
-          `   - SKUs extras: ${extraInWoo.slice(0, 10).join(', ')}${extraInWoo.length > 10 ? '...' : ''}`,
-        );
+        this.appendSyncLog('warn', `SKUs extras: ${extraInWoo.slice(0, 10).join(', ')}${extraInWoo.length > 10 ? '...' : ''}`);
       }
 
       return { missingInWoo, extraInWoo };
     } catch (error) {
-      this.logger.error('Erro na verificação de consistência:', error);
+      this.appendSyncLog('error', `Erro na verificação de consistência: ${String(error)}`);
       return { missingInWoo: [], extraInWoo: [] };
     }
   }
