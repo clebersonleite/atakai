@@ -175,6 +175,10 @@ export class SyncService implements OnModuleInit {
     const stockMatch = wcStockNum !== null && omniaStockNum !== null && wcStockNum === omniaStockNum;
     const wholesaleMatch = JSON.stringify(wcWholesaleRules) === JSON.stringify(omniaWholesaleRules);
 
+    const omniaName = omniaProduct?.nomeecommerce || omniaProduct?.descricao || null;
+    const wcName = wcProduct?.name ?? null;
+    const nameMatch = wcName !== null && omniaName !== null && wcName === omniaName;
+
     return {
       sku,
       foundInWooCommerce: !!wcProduct,
@@ -194,17 +198,18 @@ export class SyncService implements OnModuleInit {
           }
         : null,
       omnia: {
-        price: omniaPrice,
-        stock: omniaStock,
         descricao: omniaProduct?.descricao ?? null,
         nomeecommerce: omniaProduct?.nomeecommerce ?? null,
+        price: omniaPrice,
+        stock: omniaStock,
       },
       diff: {
+        name: { match: nameMatch, woo: wcName, omnia: omniaName },
         price: { match: priceMatch, woo: wcPriceNum, omnia: omniaPriceNum },
         stock: { match: stockMatch, woo: wcStockNum, omnia: omniaStockNum },
         wholesaleRules: { match: wholesaleMatch, woo: wcWholesaleRules, omnia: omniaWholesaleRules },
       },
-      inSync: priceMatch && stockMatch && wholesaleMatch,
+      inSync: nameMatch && priceMatch && stockMatch && wholesaleMatch,
     };
   }
 
