@@ -282,11 +282,15 @@ export class SyncService implements OnModuleInit {
     this.appendSyncLog('log', 'Iniciando sincronização de produtos');
 
     try {
-      const [woocommerceProducts, omniaStock, omniaPrices] = await Promise.all([
+      const [woocommerceProducts, omniaStock, omniaPrices, omniaProducts] = await Promise.all([
         this.woocommerceService.getAllProductsConcurrent(),
         this.omniaService.getStock(),
         this.omniaService.getPrices(),
+        this.omniaService.getProducts(),
       ]);
+
+      const omniaProductDetailsMap = new Map<string, OmniaProduct>();
+      omniaProducts.forEach((p) => omniaProductDetailsMap.set(String(p.codprod), p));
 
       // Mapa de produtos WooCommerce (usando SKU único)
       const wooProductsMap: Map<string, any> = new Map();
@@ -371,7 +375,7 @@ export class SyncService implements OnModuleInit {
 
       // Executar em paralelo para melhor performance
       const [createResult, updateResult, deleteResult] = await Promise.all([
-        this.createProductsBatch(newProducts, omniaStock, omniaPrices, wooProductsMap),
+        this.createProductsBatch(newProducts, omniaStock, omniaPrices, wooProductsMap, omniaProductDetailsMap),
         this.updateProductsBatch(updateProducts, omniaStock, omniaPrices, wooProductsMap),
         this.deleteProductsBatch(deleteProducts),
       ]);
@@ -413,6 +417,7 @@ export class SyncService implements OnModuleInit {
     omniaStock: OmniaStockInterface[],
     omniaPrices: OmniaPriceInterface[],
     wooProductsMap: Map<string, any>,
+    omniaProductDetailsMap: Map<string, OmniaProduct>,
   ): Promise<{ created: number }> {
     const failedList: string[] = [];
     let createdCount = 0;
@@ -424,41 +429,43 @@ export class SyncService implements OnModuleInit {
       const stockQty =
         omniaStock.find((s) => String(s.codprod) === sku)?.estoque ?? 0;
       const price = omniaPrices.find((pr) => String(pr.codprod) === sku);
+      const productDetails = omniaProductDetailsMap.get(sku);
 
       if (!price) {
         this.appendSyncLog('warn', `Produto ${sku} sem preço no Omnia, pulando`);
         return;
       }
 
+      if (!productDetails) {
+        this.appendSyncLog('warn', `Produto ${sku} sem dados de cadastro no Omnia, pulando`);
+        return;
+      }
+
       try {
         if (existingProduct) {
-          // Atualiza produto existente
           await this.woocommerceService.updateProduct(
             existingProduct.id,
-            product,
+            productDetails,
             { estoque: stockQty },
             price,
           );
           this.appendSyncLog('log', `🔄 SKU ${sku} já existia, atualizado com sucesso`);
         } else {
-          // Cria produto novo
           const createdProduct = await this.woocommerceService.createProducts(
-            product,
+            productDetails,
             { estoque: stockQty },
             price,
           );
           this.appendSyncLog('log', `✅ Criado SKU ${sku}`);
           createdCount++;
 
-          // Adicionar ao mapa local
           wooProductsMap.set(sku, createdProduct);
         }
       } catch (err: any) {
-        // Tratar erro de SKU duplicado
         const handled = await this.handleProductError(
           err,
           sku,
-          product,
+          productDetails,
           stockQty,
           price,
           wooProductsMap,
