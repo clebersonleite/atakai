@@ -412,7 +412,7 @@ export class WoocommerceService {
     try {
       const response = await this.api.get('products', {
         sku,
-        status: 'publish,draft,trash',
+        status: 'any',
       });
       const products = response.data;
 
@@ -422,10 +422,10 @@ export class WoocommerceService {
 
       return null;
     } catch (err: any) {
-      this.logger.error(
-        `Erro ao buscar produto por SKU ${sku}`,
-        err.response?.data || err,
-      );
+      const detail = err.response?.data
+        ? JSON.stringify(err.response.data)
+        : err.message || String(err);
+      this.logger.error(`Erro ao buscar produto por SKU ${sku}: ${detail}`);
       return null;
     }
   }
