@@ -83,8 +83,8 @@ export class SyncService implements OnModuleInit {
     }
   }
 
-  private buildSnapshotKey(price: OmniaPriceInterface, estoque: number): string {
-    return `${price.pvenda}|${price.pvendaatacado}|${price.qtminimaatacado}|${estoque}`;
+  private buildSnapshotKey(price: OmniaPriceInterface, estoque: number, name = ''): string {
+    return `${price.pvenda}|${price.pvendaatacado}|${price.qtminimaatacado}|${estoque}|${name}`;
   }
 
   private saveStats(stats: SyncStats): void {
@@ -335,7 +335,9 @@ export class SyncService implements OnModuleInit {
       // Verificar produtos do Omnia que não existem no WooCommerce
       for (const [sku, product] of omniaProductsMap) {
         const estoque = omniaStockMap.get(sku) ?? 0;
-        const snapshotKey = this.buildSnapshotKey(product, estoque);
+        const details = omniaProductDetailsMap.get(sku);
+        const name = details?.nomeecommerce || details?.descricao || '';
+        const snapshotKey = this.buildSnapshotKey(product, estoque, name);
         newSnapshot.set(sku, snapshotKey);
 
         if (!wooProductsMap.has(sku)) {
@@ -376,7 +378,7 @@ export class SyncService implements OnModuleInit {
       // Executar em paralelo para melhor performance
       const [createResult, updateResult, deleteResult] = await Promise.all([
         this.createProductsBatch(newProducts, omniaStock, omniaPrices, wooProductsMap, omniaProductDetailsMap),
-        this.updateProductsBatch(updateProducts, omniaStock, omniaPrices, wooProductsMap),
+        this.updateProductsBatch(updateProducts, omniaStock, omniaPrices, wooProductsMap, omniaProductDetailsMap),
         this.deleteProductsBatch(deleteProducts),
       ]);
 
@@ -489,6 +491,7 @@ export class SyncService implements OnModuleInit {
     omniaStock: OmniaStockInterface[],
     omniaPrices: OmniaPriceInterface[],
     wooProductsMap: Map<string, any>,
+    omniaProductDetailsMap: Map<string, OmniaProduct>,
   ): Promise<{ updated: number }> {
     const failedUpdates: string[] = [];
     let updatedCount = 0;
@@ -499,6 +502,12 @@ export class SyncService implements OnModuleInit {
 
       if (!wcProduct) {
         this.appendSyncLog('warn', `Produto ${sku} não encontrado no WooCommerce para atualização`);
+        return;
+      }
+
+      const productDetails = omniaProductDetailsMap.get(sku);
+      if (!productDetails) {
+        this.appendSyncLog('warn', `Produto ${sku} sem dados de cadastro no Omnia, pulando atualização`);
         return;
       }
 
@@ -513,7 +522,11 @@ export class SyncService implements OnModuleInit {
 
       const changes: string[] = [];
 
-      // Verificar se há mudanças no estoque
+      const omniaName = productDetails.nomeecommerce || productDetails.descricao;
+      if (wcProduct.name && wcProduct.name !== omniaName) {
+        changes.push(`nome: "${wcProduct.name}" → "${omniaName}"`);
+      }
+
       if (
         wcProduct.stock_quantity !== undefined &&
         Number(wcProduct.stock_quantity) !== stockQty
@@ -521,7 +534,6 @@ export class SyncService implements OnModuleInit {
         changes.push(`estoque: ${wcProduct.stock_quantity} → ${stockQty}`);
       }
 
-      // Verificar se há mudanças no preço
       if (
         wcProduct.regular_price &&
         parseFloat(Number(wcProduct.regular_price).toFixed(2)) !==
@@ -530,7 +542,6 @@ export class SyncService implements OnModuleInit {
         changes.push(`preço: ${wcProduct.regular_price} → ${price.pvenda}`);
       }
 
-      // Verificar regras de preço atacado
       const wcTieredRules =
         wcProduct.meta_data?.find((m: any) => m.key === '_fixed_price_rules')
           ?.value || {};
@@ -554,7 +565,7 @@ export class SyncService implements OnModuleInit {
           await retry(async () => {
             await this.woocommerceService.updateProduct(
               wcProduct.id,
-              product,
+              productDetails,
               { estoque: stockQty },
               price,
             );
