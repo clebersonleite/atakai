@@ -45,6 +45,40 @@ add_action('admin_menu', function () {
     );
 });
 
+// ─── AJAX: forçar sincronização ───────────────────────────────────────────────
+
+add_action('wp_ajax_takai_force_sync', function () {
+    check_ajax_referer('takai_force_sync');
+
+    if (! current_user_can('manage_options')) {
+        wp_send_json_error(['message' => 'Sem permissão.'], 403);
+    }
+
+    $api_url = rtrim(get_option('takai_api_url', ''), '/');
+    $api_key = get_option('takai_api_key', '');
+
+    if (empty($api_url)) {
+        wp_send_json_error(['message' => 'URL da API não configurada.']);
+    }
+
+    $response = wp_remote_get("{$api_url}/sync/all-products-from-apis", [
+        'timeout'   => 600,
+        'headers'   => ['x-api-key' => $api_key],
+        'sslverify' => true,
+    ]);
+
+    if (is_wp_error($response)) {
+        wp_send_json_error(['message' => 'Erro: ' . $response->get_error_message()]);
+    }
+
+    $code = wp_remote_retrieve_response_code($response);
+    if ($code !== 200) {
+        wp_send_json_error(['message' => "A API retornou HTTP {$code}."]);
+    }
+
+    wp_send_json_success(['message' => 'Sincronização concluída com sucesso!']);
+});
+
 // ─── Save settings ────────────────────────────────────────────────────────────
 
 add_action('admin_post_takai_save_settings', function () {
@@ -292,11 +326,215 @@ function takai_dashboard_page(): void
             </div>
         <?php endif; ?>
 
+        <!-- ── Logs de sincronização ────────────────── -->
+        <h2 style="margin-top:36px;padding-bottom:8px;border-bottom:1px solid #dcdcde;">
+            Logs
+            <button id="takai-logs-refresh"
+                style="margin-left:12px;font-size:12px;padding:4px 10px;
+                           background:#f0f0f0;border:1px solid #c3c4c7;border-radius:3px;
+                           cursor:pointer;vertical-align:middle;">
+                &#x27F3; Atualizar
+            </button>
+        </h2>
+        <div id="takai-logs-box"
+            style="margin-top:12px;background:#1e1e1e;color:#d4d4d4;
+                    border-radius:6px;padding:16px 18px;
+                    font-family:'Courier New',Courier,monospace;font-size:13px;
+                    line-height:1.6;max-height:420px;overflow-y:auto;">
+            <span style="color:#646970;">Carregando logs...</span>
+        </div>
+
+        <!-- ── Botão forçar sincronização ────────────────── -->
+        <h2 style="margin-top:36px;padding-bottom:8px;border-bottom:1px solid #dcdcde;">
+            Sincronização Manual
+        </h2>
+        <div style="margin-top:16px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+            <button id="takai-sync-btn"
+                style="display:inline-flex;align-items:center;gap:8px;
+                           background:#2271b1;color:#fff;border:none;border-radius:4px;
+                           padding:10px 20px;font-size:14px;font-weight:600;
+                           cursor:pointer;transition:background .2s;">
+                <span class="dashicons dashicons-update"
+                    style="font-size:18px;width:18px;height:18px;margin-top:2px;"></span>
+                Forçar Sincronização Agora
+            </button>
+            <span id="takai-sync-status" style="font-size:14px;"></span>
+        </div>
+
         <p style="margin-top:32px;color:#646970;font-size:13px;">
-            <a href="<?= esc_url(admin_url('admin.php?page=takai-dashboard')) ?>">⟳ Atualizar dados</a>
+            <a href="<?= esc_url(admin_url('admin.php?page=takai-dashboard')) ?>">&#x27F3; Atualizar dados</a>
             &nbsp;·&nbsp;
-            <a href="<?= esc_url(admin_url('admin.php?page=takai-settings')) ?>">⚙ Configurações</a>
+            <a href="<?= esc_url(admin_url('admin.php?page=takai-settings')) ?>">&#x2699; Configurações</a>
         </p>
+
+        <style>
+            @keyframes takai-spin {
+                from {
+                    transform: rotate(0deg);
+                }
+
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+        </style>
+
+        <script>
+            // ── Logs ─────────────────────────────────────────────────────────
+            (function() {
+                const box = document.getElementById('takai-logs-box');
+                const btnRef = document.getElementById('takai-logs-refresh');
+                const nonce = '<?= esc_js(wp_create_nonce('takai_get_logs')) ?>';
+
+                function levelColor(level) {
+                    if (level === 'error') return '#f48771';
+                    if (level === 'warn') return '#dba617';
+                    return '#4ec9b0';
+                }
+
+                function formatTs(ts) {
+                    try {
+                        const d = new Date(ts);
+                        return d.toLocaleString('pt-BR', {
+                            timeZone: 'America/Sao_Paulo',
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit'
+                        });
+                    } catch (e) {
+                        return ts;
+                    }
+                }
+
+                function renderLogs(logs) {
+                    if (!logs || logs.length === 0) {
+                        box.innerHTML = '<span style="color:#646970;">Nenhum log disponível ainda. Execute uma sincronização.</span>';
+                        return;
+                    }
+                    const lines = logs.map(function(e) {
+                        const color = levelColor(e.level);
+                        const ts = '<span style="color:#858585;">[' + formatTs(e.ts) + ']</span>';
+                        const lvl = '<span style="color:' + color + ';font-weight:600;">[' + e.level.toUpperCase() + ']</span>';
+                        const msg = '<span style="color:#d4d4d4;">' + e.msg.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>';
+                        return '<div style="margin:1px 0;">' + ts + ' ' + lvl + ' ' + msg + '</div>';
+                    });
+                    box.innerHTML = lines.join('');
+                    box.scrollTop = box.scrollHeight;
+                }
+
+                function fetchLogs() {
+                    const data = new FormData();
+                    data.append('action', 'takai_get_logs');
+                    data.append('_ajax_nonce', nonce);
+                    fetch(ajaxurl, {
+                            method: 'POST',
+                            body: data
+                        })
+                        .then(r => r.json())
+                        .then(function(res) {
+                            if (res.success) renderLogs(res.data);
+                            else box.innerHTML = '<span style="color:#f48771;">Erro ao buscar logs.</span>';
+                        })
+                        .catch(function() {
+                            box.innerHTML = '<span style="color:#f48771;">Falha na comunicação com o servidor.</span>';
+                        });
+                }
+
+                fetchLogs();
+                if (btnRef) btnRef.addEventListener('click', fetchLogs);
+            }());
+
+            // ── Force sync ───────────────────────────────────────────────────
+            (function() {
+                const btn = document.getElementById('takai-sync-btn');
+                const status = document.getElementById('takai-sync-status');
+                if (!btn) return;
+
+                btn.addEventListener('click', function() {
+                    btn.disabled = true;
+                    btn.style.background = '#646970';
+                    btn.querySelector('.dashicons').style.animation = 'takai-spin 1s linear infinite';
+                    status.style.color = '#646970';
+                    status.textContent = 'Sincronizando... isso pode levar alguns minutos.';
+
+                    const data = new FormData();
+                    data.append('action', 'takai_force_sync');
+                    data.append('_ajax_nonce', '<?= esc_js(wp_create_nonce('takai_force_sync')) ?>');
+
+                    fetch(ajaxurl, {
+                            method: 'POST',
+                            body: data
+                        })
+                        .then(r => r.json())
+                        .then(function(res) {
+                            if (res.success) {
+                                status.style.color = '#00a32a';
+                                status.textContent = '✅ ' + res.data.message;
+                            } else {
+                                status.style.color = '#d63638';
+                                status.textContent = '❌ ' + (res.data?.message ?? 'Erro desconhecido.');
+                            }
+                            // Atualiza logs após sync
+                            const logData = new FormData();
+                            logData.append('action', 'takai_get_logs');
+                            logData.append('_ajax_nonce', '<?= esc_js(wp_create_nonce('takai_get_logs')) ?>');
+                            fetch(ajaxurl, {
+                                    method: 'POST',
+                                    body: logData
+                                })
+                                .then(r => r.json())
+                                .then(function(r2) {
+                                    if (r2.success) {
+                                        const box = document.getElementById('takai-logs-box');
+                                        if (box) {
+                                            const logs = r2.data;
+                                            if (!logs || logs.length === 0) return;
+
+                                            function levelColor(l) {
+                                                if (l === 'error') return '#f48771';
+                                                if (l === 'warn') return '#dba617';
+                                                return '#4ec9b0';
+                                            }
+
+                                            function formatTs(ts) {
+                                                try {
+                                                    return new Date(ts).toLocaleString('pt-BR', {
+                                                        timeZone: 'America/Sao_Paulo',
+                                                        day: '2-digit',
+                                                        month: '2-digit',
+                                                        year: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit',
+                                                        second: '2-digit'
+                                                    });
+                                                } catch (e) {
+                                                    return ts;
+                                                }
+                                            }
+                                            box.innerHTML = logs.map(function(e) {
+                                                const c = levelColor(e.level);
+                                                return '<div style="margin:1px 0;"><span style="color:#858585;">[' + formatTs(e.ts) + ']</span> <span style="color:' + c + ';font-weight:600;">[' + e.level.toUpperCase() + ']</span> <span style="color:#d4d4d4;">' + e.msg.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span></div>';
+                                            }).join('');
+                                            box.scrollTop = box.scrollHeight;
+                                        }
+                                    }
+                                });
+                        })
+                        .catch(function() {
+                            status.style.color = '#d63638';
+                            status.textContent = '❌ Falha na comunicação com o servidor.';
+                        })
+                        .finally(function() {
+                            btn.disabled = false;
+                            btn.style.background = '#2271b1';
+                            btn.querySelector('.dashicons').style.animation = '';
+                        });
+                });
+            }());
+        </script>
     </div>
 <?php
 }
