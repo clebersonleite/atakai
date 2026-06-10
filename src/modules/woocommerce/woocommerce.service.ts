@@ -348,10 +348,10 @@ export class WoocommerceService {
 
   async getAllProductsConcurrent(): Promise<any[]> {
     const perPage = 100;
-    const CONCURRENCY = 3;  // máximo de requisições simultâneas ao WooCommerce
-    const DELAY_MS = 500; // pausa entre batches para evitar rate limiting
+    const CONCURRENCY = 2;
+    const DELAY_MS = 1000;
 
-    const fetchPage = async (page: number, attempt = 1): Promise<any[]> => {
+    const fetchPage = async (page: number, attempt = 1): Promise<{ data: any[]; totalPages?: number }> => {
       try {
         const response = await this.api.get('products', {
           per_page: perPage,
@@ -360,7 +360,10 @@ export class WoocommerceService {
           order: 'asc',
           status: 'any',
         });
-        return response.data;
+        const totalPages = page === 1
+          ? parseInt(response.headers['x-wp-totalpages'], 10) || 1
+          : undefined;
+        return { data: response.data, totalPages };
       } catch (err: any) {
         if (attempt < 3) {
           const delay = DELAY_MS * attempt * 2;
@@ -370,29 +373,24 @@ export class WoocommerceService {
           await new Promise((res) => setTimeout(res, delay));
           return fetchPage(page, attempt + 1);
         }
-        this.logger.error(`WooCommerce: página ${page} falhou após 3 tentativas.`);
-        return [];
+        const detail = err.response?.data
+          ? JSON.stringify(err.response.data).slice(0, 300)
+          : err.message;
+        this.logger.error(`WooCommerce: página ${page} falhou após 3 tentativas: ${detail}`);
+        return { data: [] };
       }
     };
 
-    // Primeira página — obtém total de páginas
-    const firstData = await fetchPage(1);
+    // Primeira página — obtém dados E total de páginas em uma única requisição
+    const { data: firstData, totalPages } = await fetchPage(1);
 
-    const firstResponse = await this.api.get('products', {
-      per_page: 1,
-      page: 1,
-      status: 'any',
-    });
-    const totalPages = parseInt(firstResponse.headers['x-wp-totalpages'], 10) || 1;
-
-    // Busca páginas restantes em batches controlados
-    const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+    const remainingPages = Array.from({ length: (totalPages ?? 1) - 1 }, (_, i) => i + 2);
     const extraData: any[] = [];
 
     for (let i = 0; i < remainingPages.length; i += CONCURRENCY) {
       const batch = remainingPages.slice(i, i + CONCURRENCY);
       const batchResults = await Promise.all(batch.map((page) => fetchPage(page)));
-      batchResults.forEach((pageData) => extraData.push(...pageData));
+      batchResults.forEach(({ data }) => extraData.push(...data));
 
       if (i + CONCURRENCY < remainingPages.length) {
         await new Promise((res) => setTimeout(res, DELAY_MS));

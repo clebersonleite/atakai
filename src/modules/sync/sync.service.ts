@@ -390,8 +390,8 @@ export class SyncService implements OnModuleInit {
       // Persistir snapshot atualizado
       this.saveSnapshot(newSnapshot);
 
-      // Verificar consistência após sincronização
-      await this.verifySyncConsistency();
+      // Verificar consistência após sincronização (usa dados já carregados)
+      await this.verifySyncConsistency(wooProductsMap, omniaProductsMap);
 
       const duration = Date.now() - startTime;
       const durationInSeconds = (duration / 1000).toFixed(2);
@@ -655,20 +655,13 @@ export class SyncService implements OnModuleInit {
     return false; // se não conseguiu tratar, retorna false
   }
 
-  private async verifySyncConsistency() {
+  private async verifySyncConsistency(
+    wooProductsMap: Map<string, any>,
+    omniaProductsMap: Map<string, any>,
+  ) {
     try {
-      const [wooProducts, omniaProducts] = await Promise.all([
-        this.woocommerceService.getAllProductsConcurrent(),
-        this.omniaService.getPrices(),
-      ]);
-
-      const wooSkus = wooProducts
-        .map((p) => (p.sku ? p.sku : ''))
-        .filter((sku) => sku !== '');
-
-      const omniaSkus = omniaProducts
-        .map((p) => String(p.codprod))
-        .filter((sku) => sku !== '');
+      const wooSkus = Array.from(wooProductsMap.keys());
+      const omniaSkus = Array.from(omniaProductsMap.keys());
 
       const wooSkusSet = new Set(wooSkus);
       const omniaSkusSet = new Set(omniaSkus);
