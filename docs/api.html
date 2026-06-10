@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Takai API — Documentação</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: linear-gradient(135deg, #1a1f2e 0%, #0f1117 100%);
+      border-bottom: 1px solid #2d3748;
+      padding: 2rem 3rem;
+    }
+
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #f7fafc;
+      letter-spacing: -0.5px;
+    }
+
+    header p {
+      color: #718096;
+      margin-top: 0.4rem;
+      font-size: 0.9rem;
+    }
+
+    .base-url {
+      display: inline-block;
+      margin-top: 0.75rem;
+      background: #1e2535;
+      border: 1px solid #2d3748;
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      color: #63b3ed;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2.5rem 2rem;
+    }
+
+    .section {
+      margin-bottom: 2.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid #2d3748;
+    }
+
+    .section-header h2 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #f7fafc;
+    }
+
+    .section-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .tag-root    { background: #2d3748; color: #a0aec0; }
+    .tag-omnia   { background: #1a3a5c; color: #63b3ed; }
+    .tag-woo     { background: #2d1f5c; color: #a78bfa; }
+    .tag-sync    { background: #1a3c2a; color: #68d391; }
+
+    .endpoint-card {
+      background: #1a1f2e;
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      margin-bottom: 0.75rem;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+
+    .endpoint-card:hover { border-color: #4a5568; }
+
+    .endpoint-card summary {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.9rem 1.1rem;
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+
+    .endpoint-card summary::-webkit-details-marker { display: none; }
+
+    .method {
+      flex-shrink: 0;
+      font-size: 0.7rem;
+      font-weight: 800;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+      min-width: 52px;
+      text-align: center;
+      margin-top: 1px;
+    }
+
+    .GET    { background: #1a3a2a; color: #68d391; border: 1px solid #276749; }
+    .POST   { background: #1a2f4a; color: #63b3ed; border: 1px solid #2b6cb0; }
+    .DELETE { background: #3a1a1a; color: #fc8181; border: 1px solid #c53030; }
+
+    .endpoint-path {
+      font-family: 'Courier New', monospace;
+      font-size: 0.88rem;
+      color: #e2e8f0;
+      font-weight: 600;
+    }
+
+    .endpoint-path .param {
+      color: #f6ad55;
+    }
+
+    .endpoint-desc {
+      color: #718096;
+      font-size: 0.82rem;
+      margin-top: 0.2rem;
+    }
+
+    .endpoint-body {
+      padding: 0 1.1rem 1rem 1.1rem;
+      border-top: 1px solid #2d3748;
+    }
+
+    .detail-section {
+      margin-top: 0.9rem;
+    }
+
+    .detail-section h4 {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #4a5568;
+      margin-bottom: 0.5rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+
+    th {
+      text-align: left;
+      padding: 0.35rem 0.6rem;
+      background: #0f1117;
+      color: #718096;
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid #1e2535;
+      color: #cbd5e0;
+      vertical-align: top;
+    }
+
+    td:first-child {
+      font-family: 'Courier New', monospace;
+      color: #f6ad55;
+      white-space: nowrap;
+    }
+
+    .badge-optional {
+      display: inline-block;
+      background: #2d3748;
+      color: #718096;
+      font-size: 0.65rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      margin-left: 0.3rem;
+    }
+
+    .badge-required {
+      display: inline-block;
+      background: #3a1a1a;
+      color: #fc8181;
+      font-size: 0.65rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      margin-left: 0.3rem;
+    }
+
+    .note {
+      background: #1e2535;
+      border-left: 3px solid #f6ad55;
+      border-radius: 0 4px 4px 0;
+      padding: 0.6rem 0.8rem;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-top: 0.75rem;
+    }
+
+    .note strong { color: #f6ad55; }
+
+    .auth-note {
+      background: #1e2535;
+      border-left: 3px solid #68d391;
+      border-radius: 0 4px 4px 0;
+      padding: 0.6rem 0.8rem;
+      font-size: 0.8rem;
+      color: #a0aec0;
+      margin-top: 0.75rem;
+    }
+
+    .auth-note strong { color: #68d391; }
+
+    code {
+      font-family: 'Courier New', monospace;
+      background: #0f1117;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.82rem;
+      color: #e2e8f0;
+    }
+
+    .chevron {
+      margin-left: auto;
+      color: #4a5568;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    details[open] .chevron { transform: rotate(180deg); }
+
+    .endpoint-summary-text { flex: 1; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Takai API</h1>
+  <p>Integração entre Omnia ERP e WooCommerce — sincronização de produtos, estoque e pedidos</p>
+  <span class="base-url">https://atakai-atakai-2026.yno4zb.easypanel.host</span>
+</header>
+
+<main>
+
+  <!-- ROOT -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-tag tag-root">Root</span>
+      <h2>Geral</h2>
+    </div>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/</div>
+          <div class="endpoint-desc">Health check da API</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Descrição</h4>
+          <p style="font-size:0.83rem;color:#a0aec0;">Retorna uma mensagem confirmando que a aplicação está online. Útil para verificar se o deploy está ativo.</p>
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- OMNIA -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-tag tag-omnia">Omnia</span>
+      <h2>Omnia ERP</h2>
+    </div>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/omnia/produto/<span class="param">:sku</span></div>
+          <div class="endpoint-desc">Busca um produto pelo SKU na API do Omnia</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Parâmetros de rota</h4>
+          <table>
+            <tr><th>Nome</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>sku</td><td>string</td><td>Código do produto no Omnia (<code>codprod</code>)</td></tr>
+          </table>
+        </div>
+        <div class="detail-section">
+          <h4>Retorno</h4>
+          <p style="font-size:0.83rem;color:#a0aec0;">Objeto com três arrays: <code>prices</code> (preços), <code>stock</code> (estoque) e <code>products</code> (dados de cadastro como nome, dimensões, peso).</p>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/omnia/all</div>
+          <div class="endpoint-desc">Conta total de produtos, estoques e preços no Omnia</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Descrição</h4>
+          <p style="font-size:0.83rem;color:#a0aec0;">Busca todos os dados do Omnia em paralelo e retorna apenas as contagens. Útil para diagnóstico e para verificar se a API do Omnia está acessível.</p>
+        </div>
+        <div class="detail-section">
+          <h4>Retorno</h4>
+          <table>
+            <tr><th>Campo</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>productsCount</td><td>number</td><td>Total de produtos cadastrados</td></tr>
+            <tr><td>stockCount</td><td>number</td><td>Total de registros de estoque</td></tr>
+            <tr><td>pricesCount</td><td>number</td><td>Total de registros de preço</td></tr>
+            <tr><td>durationMs</td><td>number</td><td>Tempo total da consulta em milissegundos</td></tr>
+          </table>
+        </div>
+        <div class="note"><strong>Atenção:</strong> esta chamada busca todas as páginas do Omnia e pode demorar vários segundos.</div>
+      </div>
+    </details>
+  </div>
+
+  <!-- WOOCOMMERCE -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-tag tag-woo">WooCommerce</span>
+      <h2>WooCommerce</h2>
+    </div>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/produtos</div>
+          <div class="endpoint-desc">Lista produtos com paginação e filtros</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Query params</h4>
+          <table>
+            <tr><th>Nome</th><th>Padrão</th><th>Descrição</th></tr>
+            <tr><td>page</td><td>1</td><td>Página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>perPage</td><td>20</td><td>Itens por página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>search</td><td>—</td><td>Busca por nome <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>orderby</td><td>—</td><td>Campo para ordenar <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>order</td><td>—</td><td><code>asc</code> ou <code>desc</code> <span class="badge-optional">opcional</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/produto/<span class="param">:sku</span></div>
+          <div class="endpoint-desc">Busca um produto pelo SKU no WooCommerce</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Parâmetros de rota</h4>
+          <table>
+            <tr><th>Nome</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>sku</td><td>string</td><td>SKU do produto no WooCommerce</td></tr>
+          </table>
+        </div>
+        <p style="font-size:0.83rem;color:#a0aec0;margin-top:0.75rem;">Retorna o objeto completo do produto ou <code>null</code> se não encontrado. Busca em todos os status (publicado, rascunho, lixeira).</p>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/estoque</div>
+          <div class="endpoint-desc">Lista produtos com dados de estoque</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Query params</h4>
+          <table>
+            <tr><th>Nome</th><th>Padrão</th><th>Descrição</th></tr>
+            <tr><td>page</td><td>1</td><td>Página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>perPage</td><td>20</td><td>Itens por página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>orderby</td><td>—</td><td>Campo para ordenar <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>order</td><td>—</td><td><code>asc</code> ou <code>desc</code> <span class="badge-optional">opcional</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/pedidos</div>
+          <div class="endpoint-desc">Lista pedidos com filtro por status</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Query params</h4>
+          <table>
+            <tr><th>Nome</th><th>Padrão</th><th>Descrição</th></tr>
+            <tr><td>page</td><td>1</td><td>Página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>perPage</td><td>20</td><td>Itens por página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>status</td><td>—</td><td>Status do pedido (<code>pending</code>, <code>processing</code>, <code>completed</code>…) <span class="badge-optional">opcional</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/clientes</div>
+          <div class="endpoint-desc">Lista clientes extraídos dos pedidos</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Query params</h4>
+          <table>
+            <tr><th>Nome</th><th>Padrão</th><th>Descrição</th></tr>
+            <tr><td>page</td><td>1</td><td>Página <span class="badge-optional">opcional</span></td></tr>
+            <tr><td>perPage</td><td>20</td><td>Itens por página <span class="badge-optional">opcional</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/total-produtos</div>
+          <div class="endpoint-desc">Retorna todos os produtos do WooCommerce de uma vez</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <p style="font-size:0.83rem;color:#a0aec0;margin-top:0.75rem;">Busca todas as páginas em paralelo e retorna <code>{ totalRecords, data[] }</code>. Pode demorar dependendo do volume de produtos.</p>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method DELETE">DELETE</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/woocommerce/produto/<span class="param">:sku</span></div>
+          <div class="endpoint-desc">Apaga um produto permanentemente pelo SKU</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Parâmetros de rota</h4>
+          <table>
+            <tr><th>Nome</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>sku</td><td>string</td><td>SKU do produto a ser deletado</td></tr>
+          </table>
+        </div>
+        <div class="note"><strong>Atenção:</strong> a exclusão é permanente (<code>force: true</code>) e não pode ser desfeita.</div>
+      </div>
+    </details>
+  </div>
+
+  <!-- SYNC -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-tag tag-sync">Sync</span>
+      <h2>Sincronização</h2>
+    </div>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/sync/compare/<span class="param">:sku</span></div>
+          <div class="endpoint-desc">Compara um produto entre Omnia e WooCommerce</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Parâmetros de rota</h4>
+          <table>
+            <tr><th>Nome</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>sku</td><td>string</td><td>SKU do produto a comparar</td></tr>
+          </table>
+        </div>
+        <div class="detail-section">
+          <h4>Retorno</h4>
+          <table>
+            <tr><th>Campo</th><th>Descrição</th></tr>
+            <tr><td>foundInWooCommerce</td><td>Se o produto existe no WooCommerce</td></tr>
+            <tr><td>foundInOmnia</td><td>Se o produto existe no Omnia</td></tr>
+            <tr><td>woocommerce</td><td>Dados atuais do produto no WooCommerce</td></tr>
+            <tr><td>omnia</td><td>Dados atuais do produto no Omnia (cadastro, preço, estoque)</td></tr>
+            <tr><td>diff.name</td><td>Comparação de nome: <code>match</code>, valor no Woo e no Omnia</td></tr>
+            <tr><td>diff.price</td><td>Comparação de preço de venda</td></tr>
+            <tr><td>diff.stock</td><td>Comparação de quantidade em estoque</td></tr>
+            <tr><td>diff.wholesaleRules</td><td>Comparação de regras de preço atacado</td></tr>
+            <tr><td>inSync</td><td><code>true</code> se nome, preço, estoque e atacado estão iguais</td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/sync/all-products-from-apis</div>
+          <div class="endpoint-desc">Dispara o sync manual completo (Omnia → WooCommerce)</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <p style="font-size:0.83rem;color:#a0aec0;margin-top:0.75rem;">Executa a mesma lógica do cron automático (a cada 30 minutos). Cria produtos novos, atualiza os que mudaram (preço, estoque, nome, atacado) e move para rascunho os que não existem mais no Omnia.</p>
+        <div class="note"><strong>Atenção:</strong> pode demorar vários minutos dependendo do volume. Não chame em paralelo com o cron.</div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/sync/stats</div>
+          <div class="endpoint-desc">Estatísticas do último sync executado</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="auth-note"><strong>Autenticação:</strong> header <code>x-api-key: &lt;SYNC_STATS_API_KEY&gt;</code> obrigatório.</div>
+        <div class="detail-section">
+          <h4>Retorno</h4>
+          <table>
+            <tr><th>Campo</th><th>Tipo</th><th>Descrição</th></tr>
+            <tr><td>lastSync</td><td>string (ISO)</td><td>Data/hora do último sync</td></tr>
+            <tr><td>lastSyncDurationSeconds</td><td>number</td><td>Duração em segundos</td></tr>
+            <tr><td>productsCreated</td><td>number</td><td>Produtos criados no último sync</td></tr>
+            <tr><td>productsUpdated</td><td>number</td><td>Produtos atualizados no último sync</td></tr>
+            <tr><td>productsDeleted</td><td>number</td><td>Produtos removidos no último sync</td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method GET">GET</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/sync/logs</div>
+          <div class="endpoint-desc">Últimos 200 logs de sincronização</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="auth-note"><strong>Autenticação:</strong> header <code>x-api-key: &lt;SYNC_STATS_API_KEY&gt;</code> obrigatório.</div>
+        <div class="detail-section">
+          <h4>Retorno</h4>
+          <p style="font-size:0.83rem;color:#a0aec0;margin-top:0.5rem;">Array de até 200 entradas, cada uma com:</p>
+          <table>
+            <tr><th>Campo</th><th>Descrição</th></tr>
+            <tr><td>ts</td><td>Timestamp ISO da entrada</td></tr>
+            <tr><td>level</td><td><code>log</code>, <code>warn</code> ou <code>error</code></td></tr>
+            <tr><td>msg</td><td>Mensagem do evento</td></tr>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details class="endpoint-card">
+      <summary>
+        <span class="method POST">POST</span>
+        <div class="endpoint-summary-text">
+          <div class="endpoint-path">/sync/woocommerce/webhook/created-order</div>
+          <div class="endpoint-desc">Webhook de novo pedido — cria o pedido no Omnia</div>
+        </div>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="endpoint-body">
+        <div class="detail-section">
+          <h4>Headers obrigatórios</h4>
+          <table>
+            <tr><th>Header</th><th>Descrição</th></tr>
+            <tr><td>x-wc-webhook-signature</td><td>Assinatura HMAC SHA-256 gerada pelo WooCommerce <span class="badge-required">obrigatório</span></td></tr>
+            <tr><td>x-wc-webhook-topic</td><td>Deve ser <code>order.created</code> <span class="badge-required">obrigatório</span></td></tr>
+          </table>
+        </div>
+        <div class="detail-section">
+          <h4>Fluxo</h4>
+          <p style="font-size:0.83rem;color:#a0aec0;margin-top:0.4rem;">
+            1. Valida assinatura HMAC com <code>WC_CREATED_ORDER_WEBHOOK_SECRET</code><br>
+            2. Busca código IBGE pelo CEP do cliente<br>
+            3. Se o cliente não existe no Omnia, cria automaticamente<br>
+            4. Cria o pedido no Omnia com itens, pagamento e dados de entrega
+          </p>
+        </div>
+        <div class="note"><strong>Configurar no WooCommerce:</strong> WooCommerce → Configurações → Avançado → Webhooks → Tópico: Pedido criado.</div>
+      </div>
+    </details>
+  </div>
+
+</main>
+
+</body>
+</html>
