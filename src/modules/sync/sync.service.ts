@@ -83,8 +83,8 @@ export class SyncService implements OnModuleInit {
     }
   }
 
-  private buildSnapshotKey(price: OmniaPriceInterface, estoque: number, name = ''): string {
-    return `${price.pvenda}|${price.pvendaatacado}|${price.qtminimaatacado}|${estoque}|${name}`;
+  private buildSnapshotKey(price: OmniaPriceInterface, estoque: number, name = '', multiplo = 1): string {
+    return `${price.pvenda}|${price.pvendaatacado}|${price.qtminimaatacado}|${estoque}|${name}|${multiplo}`;
   }
 
   private saveStats(stats: SyncStats): void {
@@ -161,13 +161,17 @@ export class SyncService implements OnModuleInit {
     const wcWholesaleRules =
       wcProduct?.meta_data?.find((m: any) => m.key === '_fixed_price_rules')?.value ?? {};
 
+    const multiplo = Math.max(1, Number(omniaProduct?.multiplo) || 1);
+    const effectivePrice = omniaPrice ? parseFloat((Number(omniaPrice.pvenda) * multiplo).toFixed(2)) : null;
+    const effectiveWholesale = omniaPrice ? (Number(omniaPrice.pvendaatacado) * multiplo).toFixed(2) : null;
+
     const omniaWholesaleRules =
       omniaPrice && omniaPrice.qtminimaatacado > 1
-        ? { [omniaPrice.qtminimaatacado.toString()]: Number(omniaPrice.pvendaatacado).toFixed(2) }
+        ? { [omniaPrice.qtminimaatacado.toString()]: effectiveWholesale }
         : {};
 
     const wcPriceNum = wcProduct ? parseFloat(Number(wcProduct.regular_price).toFixed(2)) : null;
-    const omniaPriceNum = omniaPrice ? parseFloat(Number(omniaPrice.pvenda).toFixed(2)) : null;
+    const omniaPriceNum = effectivePrice;
     const wcStockNum = wcProduct?.stock_quantity ?? null;
     const omniaStockNum = omniaStock?.estoque ?? null;
 
@@ -337,7 +341,8 @@ export class SyncService implements OnModuleInit {
         const estoque = omniaStockMap.get(sku) ?? 0;
         const details = omniaProductDetailsMap.get(sku);
         const name = details?.nomeecommerce || details?.descricao || '';
-        const snapshotKey = this.buildSnapshotKey(product, estoque, name);
+        const multiplo = Math.max(1, Number(details?.multiplo) || 1);
+        const snapshotKey = this.buildSnapshotKey(product, estoque, name, multiplo);
         newSnapshot.set(sku, snapshotKey);
 
         if (!wooProductsMap.has(sku)) {
@@ -522,6 +527,10 @@ export class SyncService implements OnModuleInit {
 
       const changes: string[] = [];
 
+      const multiplo = Math.max(1, Number(productDetails.multiplo) || 1);
+      const effectivePrice = parseFloat((Number(price.pvenda) * multiplo).toFixed(2));
+      const effectiveWholesale = (Number(price.pvendaatacado) * multiplo).toFixed(2);
+
       const omniaName = productDetails.nomeecommerce || productDetails.descricao;
       if (wcProduct.name && wcProduct.name !== omniaName) {
         changes.push(`nome: "${wcProduct.name}" → "${omniaName}"`);
@@ -536,10 +545,9 @@ export class SyncService implements OnModuleInit {
 
       if (
         wcProduct.regular_price &&
-        parseFloat(Number(wcProduct.regular_price).toFixed(2)) !==
-        parseFloat(Number(price.pvenda).toFixed(2))
+        parseFloat(Number(wcProduct.regular_price).toFixed(2)) !== effectivePrice
       ) {
-        changes.push(`preço: ${wcProduct.regular_price} → ${price.pvenda}`);
+        changes.push(`preço: ${wcProduct.regular_price} → ${effectivePrice}`);
       }
 
       const wcTieredRules =
@@ -547,11 +555,7 @@ export class SyncService implements OnModuleInit {
           ?.value || {};
       const omniaTieredRules =
         price.qtminimaatacado > 1
-          ? {
-            [price.qtminimaatacado.toString()]: Number(
-              price.pvendaatacado,
-            ).toFixed(2),
-          }
+          ? { [price.qtminimaatacado.toString()]: effectiveWholesale }
           : {};
 
       if (JSON.stringify(wcTieredRules) !== JSON.stringify(omniaTieredRules)) {

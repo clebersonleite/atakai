@@ -41,12 +41,16 @@ export class WoocommerceService {
       ? dimensions
       : undefined;
 
+    const multiplo = Math.max(1, Number(product.multiplo) || 1);
+    const regularPrice = (Number(price.pvenda) * multiplo).toFixed(2);
+    const wholesalePrice = (Number(price.pvendaatacado) * multiplo).toFixed(2);
+
     const productToCreate: any = {
       name: product.nomeecommerce || product.descricao,
       description: product.descricaolonga || '',
       short_description: product.descricaocurta || '',
       sku: String(product.codprod),
-      regular_price: String(Number(price.pvenda).toFixed(2)),
+      regular_price: regularPrice,
       manage_stock: true,
       stock_quantity: Math.floor(Number(stock.estoque ?? 0)),
       stock_status: Number(stock.estoque) > 0 ? 'instock' : 'outofstock',
@@ -63,11 +67,7 @@ export class WoocommerceService {
           key: '_fixed_price_rules',
           value:
             price.qtminimaatacado > 1
-              ? {
-                [price.qtminimaatacado.toString()]: Number(
-                  price.pvendaatacado,
-                ).toFixed(2),
-              }
+              ? { [price.qtminimaatacado.toString()]: wholesalePrice }
               : {},
         },
       ],
@@ -93,9 +93,13 @@ export class WoocommerceService {
     stock: OmniaStockInterface,
     price: OmniaPriceInterface,
   ) {
+    const multiplo = Math.max(1, Number(product.multiplo) || 1);
+    const regularPrice = (Number(price.pvenda) * multiplo).toFixed(2);
+    const wholesalePrice = (Number(price.pvendaatacado) * multiplo).toFixed(2);
+
     const productToUpdate: Partial<any> = {
       name: product.nomeecommerce || product.descricao,
-      regular_price: String(Number(price.pvenda).toFixed(2)),
+      regular_price: regularPrice,
       manage_stock: true,
       stock_quantity: Math.floor(Number(stock.estoque ?? 0)),
       stock_status: Number(stock.estoque) > 0 ? 'instock' : 'outofstock',
@@ -110,11 +114,7 @@ export class WoocommerceService {
           key: '_fixed_price_rules',
           value:
             price.qtminimaatacado > 1
-              ? {
-                [price.qtminimaatacado.toString()]: Number(
-                  price.pvendaatacado,
-                ).toFixed(2),
-              }
+              ? { [price.qtminimaatacado.toString()]: wholesalePrice }
               : {},
         },
       ],
